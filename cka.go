@@ -40,10 +40,33 @@ func NewCKAState(publicKey kem.PublicKey, privateKey kem.PrivateKey) *CKAState {
 
 // CKAMessage encapsulates a CKA Message.
 type CKAMessage struct {
-	// Ciphertext is the new KEM ciphertext.
-	Ciphertext []byte
 	// PublicKey is the new KEM public key.
 	PublicKey kem.PublicKey
+	// Ciphertext is the new KEM ciphertext.
+	Ciphertext []byte
+}
+
+func ckaMessageFromBinbary(scheme kem.Scheme, b []byte) (*CKAMessage, error) {
+	offset := scheme.PublicKeySize()
+	pubkeyRaw := b[:offset]
+	pubkey, err := scheme.UnmarshalBinaryPublicKey(pubkeyRaw)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext := b[offset:]
+
+	return &CKAMessage{
+		PublicKey:  pubkey,
+		Ciphertext: ciphertext,
+	}, nil
+}
+
+func (c *CKAMessage) MarshalBinary() ([]byte, error) {
+	pubkeyBlob, err := c.PublicKey.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	return append(pubkeyBlob, c.Ciphertext...), nil
 }
 
 // CKA is also known as Continuous Key Agreement

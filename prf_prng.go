@@ -17,11 +17,19 @@ const (
 )
 
 var (
-	hkdfInitLabel = []byte("prf prng hkdf init")
+	hkdfInitPRFPRNGLabel = []byte("prf prng hkdf init")
 )
 
 type PRF_PRNG struct {
 	state []byte
+}
+
+func blakeHash() hash.Hash {
+	h, err := blake2b.New512(nil)
+	if err != nil {
+		panic(err)
+	}
+	return h
 }
 
 func NewPRF_PRNG(key []byte) (*PRF_PRNG, error) {
@@ -29,15 +37,7 @@ func NewPRF_PRNG(key []byte) (*PRF_PRNG, error) {
 		return nil, errors.New("wrong key size")
 	}
 
-	myHash := func() hash.Hash {
-		h, err := blake2b.New512(nil)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
-
-	h := hkdf.New(myHash, key, nil, hkdfInitLabel)
+	h := hkdf.New(blakeHash, key, nil, hkdfInitPRFPRNGLabel)
 	state := make([]byte, 64)
 	_, err := h.Read(state)
 	if err != nil {
@@ -50,17 +50,10 @@ func NewPRF_PRNG(key []byte) (*PRF_PRNG, error) {
 }
 
 func (p *PRF_PRNG) Up(b []byte) []byte {
-	myHash := func() hash.Hash {
-		h, err := blake2b.New512(nil)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
+	// func New(hash func() hash.Hash, secret, salt, info []byte) io.Reader {
+	h := hkdf.New(blakeHash, b, p.state, hkdfInitPRFPRNGLabel)
 
-	h := hkdf.New(myHash, b, p.state, hkdfInitLabel)
-
-	stream := make([]byte, (PRF_PRNG_Keysize + len(b)))
+	stream := make([]byte, (PRF_PRNG_Keysize * 2))
 	_, err := h.Read(stream)
 	if err != nil {
 		panic(err)
