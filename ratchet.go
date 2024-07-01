@@ -7,8 +7,10 @@ package ratchet
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/katzenpost/hpqc/kem"
+	"github.com/katzenpost/hpqc/kem/schemes"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -20,6 +22,10 @@ type header struct {
 	cur        uint32
 	prev       uint32
 	ckaMessage *CKAMessage
+}
+
+func headerSize(scheme kem.Scheme) int {
+	return 4 + 4 + scheme.CiphertextSize() + scheme.PublicKeySize()
 }
 
 func headerFromBinary(scheme kem.Scheme, b []byte) (*header, error) {
@@ -67,6 +73,8 @@ type Ratchet struct {
 
 	prev uint32
 	cur  uint32
+
+	scheme kem.Scheme
 }
 
 func New(seed []byte, isA bool) (*Ratchet, error) {
@@ -75,6 +83,11 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 	}
 
 	kemName := "x25519"
+	s := schemes.ByName(kemName)
+	if s == nil {
+		return nil, fmt.Errorf("KEM scheme '%s' not supported", kemName)
+	}
+
 	cka, err := NewCKA(kemName, seed[:CKA_SeedSize], isA)
 	if err != nil {
 		return nil, err
@@ -106,6 +119,7 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 	states[0] = fsAead
 
 	return &Ratchet{
+		scheme: s,
 		isA:    isA,
 		states: states,
 		root:   rng,
@@ -168,40 +182,41 @@ func (r *Ratchet) Send(message []byte) []byte {
 	return append(ad, ciphertext...)
 }
 
-/*
-Receiving messages: When a ciphertext c = (h, e, `) with header h = (t, T, `) is processed
-by Rcv-A, there are two possibilities:
-– t ≤ tcur: In this case, ciphertext c pertains to an existing FS-AEAD epoch, in which
-case FS-Send is simply called on v[t] to process e. If the maximum number of messages
-has been received for session v[t], the session is removed from memory.
-– t = tcur + 1 (in which case tcur is odd): Here, the receiver algorithm advances tcur by
-incrementing it and processes T with CKA-R. This produces a key I, which is absorbed
-into the PRF-PRG to obtain a key k with which to initialize a new epoch v[tcur] as
-receiver. Then, e is processed by FS-Rcv on v[tcur]. Note that Rcv also uses FS-Max to
-store ` as the maximum number of messages in the previous receive epoch.
-*/
-
 // Receive decrypts the ciphertext and returns the plaintext or an error.
 func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
-	/*
-	   Rcv-A (c)
-	   (h, e) ← c
-	   (t, T, `) ← h
-	   req t even and t ≤ tcur + 1
-	   if t = tcur + 1
-	       tcur ++
-	       FS-Max(v[t − 2], `)
-	       (γ, I) ← CKA-R(γ, T)
-	       (σroot, k) ← P-Up(σroot, I)
-	       v[t] ← FS-Init-R(k)
-	   (v[t], i, m) ← FS-Rcv(v[t], h, e)
-	   if m = ⊥
-	       error
-	   return (t, i, m)
-	*/
+	ad := ciphertext[:headerSize(r.scheme)]
+	ciphertext = ciphertext[headerSize(r.scheme):]
 
-	// XXX fix me
-	//ad := make([]byte, 32)
+	myHeader, err := headerFromBinary(r.scheme, ad)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, nil // XXX
+	// if t = tcur + 1
+	if myHeader.cur == r.cur+1 {
+		// tcur ++
+		r.cur++
+		// FS-Max(v[t − 2], `)
+		r.states[myHeader.cur].Max(r.prev)
+		// (γ, I) ← CKA-R(γ, T)
+		sharedSecret, err := r.cka.Receive(myHeader.ckaMessage)
+		if err != nil {
+			return nil, err
+		}
+		// (σroot, k) ← P-Up(σroot, I)
+		key := r.root.Up(sharedSecret)
+		// v[t] ← FS-Init-R(k)
+		r.states[myHeader.cur], err = NewFSAEAD(key, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// (v[t], i, m) ← FS-Rcv(v[t], h, e)
+	// XXX I'm not sure if this is correct
+	plaintext, _, err := r.states[myHeader.cur].Receive(ciphertext, ad, r.cur)
+	if err != nil {
+		return nil, err
+	}
+	return plaintext, nil
 }
