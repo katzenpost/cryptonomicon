@@ -1,0 +1,34 @@
+
+The Double Ratchet Algorithm blog post
+https://signal.org/docs/specifications/doubleratchet/
+
+The Double Ratchet Algorithm pdf doc
+https://signal.org/docs/specifications/doubleratchet/doubleratchet.pdf
+
+Efficient Continuous Key Agreement With Reduced
+Bandwidth From a Decomposable KEM
+https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10086514
+
+The Post-Quantum Signal Protocol
+Secure Chat in a Quantum World
+https://essay.utwente.nl/77239/1/Duits_MA_EEMCS.pdf
+
+Hybrid Signal protocol for post-quantum email
+encryption
+https://eprint.iacr.org/2021/875.pdf
+
+Formal Verification of a Post-Quantum Signal Protocol
+with Tamarin
+https://hal.science/hal-04361766/document
+
+
+
+
+***--->>> this is the way we are going to build it:
+
+The Double Ratchet: Security Notions, Proofs, and Modularization for the Signal Protocol
+https://eprint.iacr.org/2018/1037.pdf
+
+
+
+
