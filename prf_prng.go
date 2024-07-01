@@ -59,11 +59,8 @@ func (p *PRF_PRNG) Up(b []byte) []byte {
 		panic(err)
 	}
 
-	q, err := NewPRF_PRNG(stream[:PRF_PRNG_Keysize])
-	if err != nil {
-		panic(err)
-	}
-	p.state = q.state
+	// Update state with the first half of the stream
+	p.state = stream[:PRF_PRNG_Keysize]
 
 	return stream[PRF_PRNG_Keysize:]
 }
