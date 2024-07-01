@@ -99,26 +99,39 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 		return nil, err
 	}
 
+	// is this a typo in the paper?
 	// (σroot, k) ← P-Up(σroot, λ)
-	// XXX FIX ME
-	// outputKey := rng.Up(lambda)
+	// perhaps should be this:
+	// (σroot, λ) ← P-Up(σroot, k)
+	// XXX is this correct?
+	//lambda := rng.Up(seed)
 
 	// v[·] ← λ
 	// XXX FIX ME: what does this mean?
 	// initialize all vectors to λ?
-	// we don't have any λ. or any vectors yet.
+	// we don't have v[] entries yet.
 
 	states := make(map[uint32]*ForwardSecureAEAD)
 
 	// v[0] ← FS-Init-R(k)
 	hashed := blake2b.Sum512(seed)
+
+	// γ ← CKA-Init-A(kCKA )
 	fsAead, err := NewFSAEAD(hashed[:], isA)
 	if err != nil {
 		return nil, err
 	}
 	states[0] = fsAead
 
+	// Tcur ← λ
+	// XXX what does this mean?
+
 	return &Ratchet{
+		// `prv ← 0
+		prev: 0,
+		// tcur ← 0
+		cur: 0,
+
 		scheme: s,
 		isA:    isA,
 		states: states,
