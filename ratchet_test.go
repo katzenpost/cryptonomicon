@@ -11,6 +11,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHeaderMarshaling(t *testing.T) {
+	ikm := make([]byte, 64)
+	_, err := rand.Reader.Read(ikm)
+	require.NoError(t, err)
+
+	alice, err := NewCKA("x25519", ikm, true)
+	require.NoError(t, err)
+
+	message1, _, err := alice.Send()
+	require.NoError(t, err)
+
+	h := &header{
+		cur:        123,
+		prev:       123,
+		ckaMessage: message1,
+	}
+	blob, err := h.MarshalBinary()
+	require.NoError(t, err)
+
+	h2, err := headerFromBinary(alice.scheme, blob)
+	require.NoError(t, err)
+
+	require.Equal(t, h.cur, h2.cur)
+	require.Equal(t, h.prev, h2.prev)
+}
+
 func TestRatchet(t *testing.T) {
 	seed := make([]byte, RatchetSeedSize)
 	_, err := rand.Reader.Read(seed)

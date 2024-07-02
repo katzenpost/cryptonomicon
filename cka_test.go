@@ -8,8 +8,41 @@ import (
 	"crypto/rand"
 	"testing"
 
+	"github.com/katzenpost/hpqc/kem/schemes"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCKAMessageMarshaling(t *testing.T) {
+	ikm := make([]byte, 64)
+	_, err := rand.Reader.Read(ikm)
+	require.NoError(t, err)
+
+	kemName := "x25519"
+
+	alice, err := NewCKA(kemName, ikm, true)
+	require.NoError(t, err)
+
+	message1, _, err := alice.Send()
+	require.NoError(t, err)
+
+	blob1, err := message1.MarshalBinary()
+	require.NoError(t, err)
+
+	scheme := schemes.ByName(kemName)
+	require.NotNil(t, scheme)
+
+	message2, err := ckaMessageFromBinary(scheme, blob1)
+	require.NoError(t, err)
+
+	require.Equal(t, message1.Ciphertext, message2.Ciphertext)
+
+	pubkey1raw, err := message1.PublicKey.MarshalBinary()
+	require.NoError(t, err)
+	pubkey2raw, err := message2.PublicKey.MarshalBinary()
+	require.NoError(t, err)
+
+	require.Equal(t, pubkey1raw, pubkey2raw)
+}
 
 func TestCKA(t *testing.T) {
 	ikm := make([]byte, 64)

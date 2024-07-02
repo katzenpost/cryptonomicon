@@ -46,7 +46,7 @@ type CKAMessage struct {
 	Ciphertext []byte
 }
 
-func ckaMessageFromBinbary(scheme kem.Scheme, b []byte) (*CKAMessage, error) {
+func ckaMessageFromBinary(scheme kem.Scheme, b []byte) (*CKAMessage, error) {
 	offset := scheme.PublicKeySize()
 	pubkeyRaw := b[:offset]
 	pubkey, err := scheme.UnmarshalBinaryPublicKey(pubkeyRaw)

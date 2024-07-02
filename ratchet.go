@@ -31,10 +31,8 @@ func headerSize(scheme kem.Scheme) int {
 func headerFromBinary(scheme kem.Scheme, b []byte) (*header, error) {
 	cur := binary.BigEndian.Uint32(b[:4])
 	prev := binary.BigEndian.Uint32(b[4:8])
-
-	// scheme.PublicKeySize()
 	ckaMessageBlob := b[8:]
-	ckaMessage, err := ckaMessageFromBinbary(scheme, ckaMessageBlob)
+	ckaMessage, err := ckaMessageFromBinary(scheme, ckaMessageBlob)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +56,7 @@ func (h *header) MarshalBinary() ([]byte, error) {
 		return nil, err
 	}
 
-	return ckaMessageBlob, nil
+	return append(append(curRaw, prevRaw...), ckaMessageBlob...), nil
 }
 
 type Ratchet struct {
@@ -99,12 +97,10 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 		return nil, err
 	}
 
-	// is this a typo in the paper?
 	// (σroot, k) ← P-Up(σroot, λ)
-	// perhaps should be this:
-	// (σroot, λ) ← P-Up(σroot, k)
-	// XXX is this correct?
-	//lambda := rng.Up(seed)
+	// XXX what's the proper way to do this?
+	lambda := make([]byte, 64)
+	key := rng.Up(lambda)
 
 	// v[·] ← λ
 	// XXX FIX ME: what does this mean?
@@ -114,7 +110,7 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 	states := make(map[uint32]*ForwardSecureAEAD)
 
 	// v[0] ← FS-Init-R(k)
-	hashed := blake2b.Sum512(seed)
+	hashed := blake2b.Sum512(key)
 
 	// γ ← CKA-Init-A(kCKA )
 	fsAead, err := NewFSAEAD(hashed[:], isA)
@@ -124,13 +120,18 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 	states[0] = fsAead
 
 	// Tcur ← λ
-	// XXX what does this mean?
+	currentMessage := &CKAMessage{
+		PublicKey:  cka.state.PublicKey,
+		Ciphertext: make([]byte, cka.scheme.CiphertextSize()),
+	}
 
 	return &Ratchet{
 		// `prv ← 0
 		prev: 0,
 		// tcur ← 0
 		cur: 0,
+
+		currentMessage: currentMessage,
 
 		scheme: s,
 		isA:    isA,
@@ -143,7 +144,7 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 // Send comsumes the given message and returns a ciphertext.
 func (r *Ratchet) Send(message []byte) []byte {
 	// if tcur is even
-	if (r.cur % 2) == 0 {
+	if r.cur != 0 && (r.cur%2) == 0 {
 
 		// `prv ← FS-Stop(v[tcur − 1])
 		state, ok := r.states[r.cur-1]
