@@ -11,7 +11,6 @@ import (
 
 	"github.com/katzenpost/hpqc/kem"
 	"github.com/katzenpost/hpqc/kem/schemes"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -86,43 +85,29 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 		return nil, fmt.Errorf("KEM scheme '%s' not supported", kemName)
 	}
 
-	cka, err := NewCKA(kemName, seed[:CKA_SeedSize], isA)
-	if err != nil {
-		return nil, err
-	}
+	// (kroot , kCKA ) ← k
+	kroot := seed[:PRF_PRNG_Keysize]
+	kCKA := seed[PRF_PRNG_Keysize:]
 
 	// σroot ← P-Init(kroot)
-	rng, err := NewPRF_PRNG(seed[CKA_SeedSize:])
+	rng, err := NewPRF_PRNG(kroot)
 	if err != nil {
 		return nil, err
 	}
 
 	// (σroot, k) ← P-Up(σroot, λ)
-	// XXX what's the proper way to do this?
-	lambda := make([]byte, 64)
-	key := rng.Up(lambda)
+	// Here λ refers to the default vaule which
+	// all ratchets will use.
+	labmda := make([]byte, 64)
+	_ = rng.Up(labmda)
 
 	// v[·] ← λ
-	// XXX FIX ME: what does this mean?
-	// initialize all vectors to λ?
-	// we don't have v[] entries yet.
-
 	states := make(map[uint32]*ForwardSecureAEAD)
 
-	// v[0] ← FS-Init-R(k)
-	hashed := blake2b.Sum512(key)
-
 	// γ ← CKA-Init-A(kCKA )
-	fsAead, err := NewFSAEAD(hashed[:], isA)
+	cka, err := NewCKA(kemName, kCKA, isA)
 	if err != nil {
 		return nil, err
-	}
-	states[0] = fsAead
-
-	// Tcur ← λ
-	currentMessage := &CKAMessage{
-		PublicKey:  cka.state.PublicKey,
-		Ciphertext: make([]byte, cka.scheme.CiphertextSize()),
 	}
 
 	return &Ratchet{
@@ -130,8 +115,6 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 		prev: 0,
 		// tcur ← 0
 		cur: 0,
-
-		currentMessage: currentMessage,
 
 		scheme: s,
 		isA:    isA,
@@ -143,32 +126,47 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 
 // Send comsumes the given message and returns a ciphertext.
 func (r *Ratchet) Send(message []byte) []byte {
-	// if tcur is even
-	if r.cur != 0 && (r.cur%2) == 0 {
+	checkEven := false
+	if r.isA == true {
+		checkEven = true
+	}
+	isEven := false
+	if (r.cur % 2) == 0 {
+		isEven = true
+	}
+	doUpdate := false
+	switch {
+	case checkEven == true && isEven == true:
+		doUpdate = true
+	case checkEven == false && isEven == false:
+		doUpdate = true
+	}
 
-		// `prv ← FS-Stop(v[tcur − 1])
-		state, ok := r.states[r.cur-1]
-		if !ok {
-			panic("failed to find map entry")
+	if doUpdate {
+		if r.cur != 0 && r.cur != 1 {
+			// `prv ← FS-Stop(v[tcur − 1])
+			state, ok := r.states[r.cur-1]
+			if !ok {
+				panic("failed to find map entry")
+			}
+			r.prev = state.Stop()
 		}
-		r.prev = state.Stop()
 
 		// tcur++
 		r.cur++
 
 		// (γ, Tcur, I) ←$ CKA-S(γ)
-		// message, sharedSecret, err := r.cka.Send()
 		currentMessage, sharedSecret, err := r.cka.Send()
+		r.currentMessage = currentMessage
 		if err != nil {
 			panic(err)
 		}
-		r.currentMessage = currentMessage
 
 		// (σroot, k) ← P-Up(σroot, I)
 		seed := r.root.Up(sharedSecret)
 
 		// v[tcur] ← FS-Init-S(k)
-		fs, err := NewFSAEAD(seed, r.isA)
+		fs, err := NewFSAEAD(seed, true)
 		if err != nil {
 			panic(err)
 		}
@@ -192,26 +190,50 @@ func (r *Ratchet) Send(message []byte) []byte {
 
 	// (v[tcur], e) ← FS-Send(v[tcur], h, m)
 	fs := r.states[r.cur]
-	_, ciphertext := fs.Send(message, ad)
+	ad, ciphertext := fs.Send(message, ad)
 	return append(ad, ciphertext...)
 }
 
 // Receive decrypts the ciphertext and returns the plaintext or an error.
 func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
-	ad := ciphertext[:headerSize(r.scheme)]
-	ciphertext = ciphertext[headerSize(r.scheme):]
+	// (h, e) ← c
+	ad := ciphertext[:headerSize(r.scheme)+4]
+	ciphertext = ciphertext[4+headerSize(r.scheme):]
 
-	myHeader, err := headerFromBinary(r.scheme, ad)
+	// (t, T, `) ← h
+	myHeader, err := headerFromBinary(r.scheme, ad[4:])
 	if err != nil {
 		return nil, err
+	}
+
+	// req t even and t ≤ tcur + 1
+	checkEven := false
+	if r.isA == false {
+		checkEven = true
+	}
+	isEven := false
+	if r.cur != 0 && (r.cur%2) == 0 {
+		isEven = true
+	}
+	switch {
+	case checkEven == true && isEven == true:
+		fallthrough
+	case checkEven == false && isEven == false:
+		if myHeader.cur > r.cur {
+			panic("Receive: header.cur out of bounds")
+		}
 	}
 
 	// if t = tcur + 1
 	if myHeader.cur == r.cur+1 {
 		// tcur ++
 		r.cur++
+
 		// FS-Max(v[t − 2], `)
-		r.states[myHeader.cur].Max(r.prev)
+		if r.cur != 1 {
+			r.states[myHeader.cur-2].Max(r.prev)
+		}
+
 		// (γ, I) ← CKA-R(γ, T)
 		sharedSecret, err := r.cka.Receive(myHeader.ckaMessage)
 		if err != nil {
@@ -227,8 +249,7 @@ func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 	}
 
 	// (v[t], i, m) ← FS-Rcv(v[t], h, e)
-	// XXX I'm not sure if this is correct
-	plaintext, _, err := r.states[myHeader.cur].Receive(ciphertext, ad, r.cur)
+	plaintext, err := r.states[myHeader.cur].Receive(ciphertext, ad)
 	if err != nil {
 		return nil, err
 	}

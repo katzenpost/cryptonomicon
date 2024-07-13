@@ -34,13 +34,11 @@ func Test_FS_AEAD(t *testing.T) {
 	_, err = rand.Reader.Read(ad1)
 	require.NoError(t, err)
 
-	count1, ciphertext1 := alice.Send(message1a, ad1)
-	require.Equal(t, count1, uint32(1))
+	ad1, ciphertext1 := alice.Send(message1a, ad1)
 
-	message1b, count1b, err := bob.Receive(ciphertext1, ad1, count1)
+	message1b, err := bob.Receive(ciphertext1, ad1)
 	require.NoError(t, err)
 	require.Equal(t, message1a, message1b)
-	require.Equal(t, count1, count1b)
 
 	// second message from alice to bob
 
@@ -52,11 +50,9 @@ func Test_FS_AEAD(t *testing.T) {
 	_, err = rand.Reader.Read(ad2)
 	require.NoError(t, err)
 
-	count2, ciphertext2 := alice.Send(message2a, ad2)
-	require.Equal(t, count1, uint32(1))
+	ad2, ciphertext2 := alice.Send(message2a, ad2)
 
-	message2b, count2b, err := bob.Receive(ciphertext2, ad2, count2)
+	message2b, err := bob.Receive(ciphertext2, ad2)
 	require.NoError(t, err)
 	require.Equal(t, message2a, message2b)
-	require.Equal(t, count2, count2b)
 }

@@ -8,7 +8,6 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash"
 
 	"golang.org/x/crypto/blake2b"
@@ -133,20 +132,14 @@ func NewFSAEAD(seed []byte, isSender bool) (*ForwardSecureAEAD, error) {
 	prgIV := &[StreamIVLength]byte{}
 	deriveKey(prgIV[:], prgIVLabel, h)
 
-	aeadKey := make([]byte, chacha20poly1305.KeySize)
-	aead, err := chacha20poly1305.New(aeadKey)
-	if err != nil {
-		return nil, err
-	}
-
-	keyStorage := make(map[uint32][]byte)
+	var keyStorage map[uint32][]byte
 	if !isSender {
-		keyStorage[0] = aeadKey
+		keyStorage = make(map[uint32][]byte)
 	}
 
 	return &ForwardSecureAEAD{
 		prg:          NewStream(prgKey, prgIV),
-		aead:         aead,
+		aead:         nil,
 		keyStorage:   keyStorage,
 		receiveMax:   defaultMaxReceive,
 		receiveCount: 0,
@@ -156,24 +149,27 @@ func NewFSAEAD(seed []byte, isSender bool) (*ForwardSecureAEAD, error) {
 }
 
 // Send implements the FSAEAD send op.
-func (f *ForwardSecureAEAD) Send(message, ad []byte) (uint32, []byte) {
+func (f *ForwardSecureAEAD) Send(message, ad []byte) ([]byte, []byte) {
+	// iA ++
 	f.sendCount++
-	fmt.Println("Send updateState")
+
+	// (w, K) ← G(w)
 	f.updateState(true)
 
-	nonce := make([]byte, f.aead.NonceSize())
-
+	// h ← (iA , a)
 	adPrefix := make([]byte, 4)
 	binary.BigEndian.PutUint32(adPrefix, f.sendCount)
 
-	return f.sendCount, f.aead.Seal(nil, nonce, message, append(adPrefix, ad...))
+	// e ← Enc(K, h, m)
+	// return (iA , e)
+	nonce := make([]byte, f.aead.NonceSize())
+	ad = append(adPrefix, ad...)
+	return ad, f.aead.Seal(nil, nonce, message, ad)
 }
 
 func (f *ForwardSecureAEAD) trySkipped(index uint32) []byte {
-	fmt.Println("trySkipped")
 	k, ok := f.keyStorage[index]
 	if ok {
-		fmt.Println("trySkipped found")
 		delete(f.keyStorage, index)
 		return k
 	}
@@ -203,6 +199,9 @@ func (f *ForwardSecureAEAD) updateState(isSender bool) []byte {
 }
 
 func (f *ForwardSecureAEAD) skip(count uint32) {
+	if count == 0 {
+		return
+	}
 	for f.receiveCount < count-1 {
 		f.receiveCount++
 		aeadKey := f.updateState(false)
@@ -211,22 +210,33 @@ func (f *ForwardSecureAEAD) skip(count uint32) {
 }
 
 // Receive implements the FSAEAD receive op.
-func (f *ForwardSecureAEAD) Receive(ciphertext, ad []byte, receiveCount uint32) ([]byte, uint32, error) {
+func (f *ForwardSecureAEAD) Receive(ciphertext, ad []byte) ([]byte, error) {
+	//(i, e) ← c
+	receiveCount := binary.BigEndian.Uint32(ad[:4])
+
+	// K ← try-skipped(i)
 	key := f.trySkipped(receiveCount)
+
+	// if K = ⊥
 	if key == nil {
+		// skip(i)
 		f.skip(receiveCount)
+		// (w, K) ← G(w)
 		f.updateState(false)
+		// iB ← i
 		f.receiveCount = receiveCount
 	}
 
-	nonce := make([]byte, f.aead.NonceSize())
+	// h ← (i, a)
 	newAdPrefix := make([]byte, 4)
 	binary.BigEndian.PutUint32(newAdPrefix, receiveCount)
-	plaintext, err := f.aead.Open(nil, nonce, ciphertext, append(newAdPrefix, ad...))
+	// m ← Dec(K, h, e)
+	nonce := make([]byte, f.aead.NonceSize())
+	plaintext, err := f.aead.Open(nil, nonce, ciphertext, ad)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return plaintext, receiveCount, nil
+	return plaintext, nil
 }
 
 // memory management methods
