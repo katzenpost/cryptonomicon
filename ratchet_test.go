@@ -42,19 +42,20 @@ func TestRatchet(t *testing.T) {
 	_, err := rand.Reader.Read(seed)
 	require.NoError(t, err)
 
-	alice, err := New(seed, false)
+	alice, err := New(seed, true)
 	require.NoError(t, err)
-
-	bob, err := New(seed, true)
+	bob, err := New(seed, false)
 	require.NoError(t, err)
 
 	message1 := []byte("hello Bob")
-
-	ciphertext1 := bob.Send(message1)
-	t.Log("bob sent message")
-
-	message1b, err := alice.Receive(ciphertext1)
+	ciphertext1 := alice.Send(message1)
+	message1b, err := bob.Receive(ciphertext1)
 	require.NoError(t, err)
-
 	require.Equal(t, message1, message1b)
+
+	message2 := []byte("hello Alice")
+	ciphertext2 := alice.Send(message2)
+	message2b, err := bob.Receive(ciphertext2)
+	require.NoError(t, err)
+	require.Equal(t, message2, message2b)
 }
