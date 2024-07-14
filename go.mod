@@ -3,7 +3,7 @@ module github.com/katzenpost/cryptonomicon
 go 1.22.3
 
 require (
-	github.com/katzenpost/chacha20poly1305 v0.0.0-20211026103954-7b6fb2fc0129
+	github.com/fxamacker/cbor/v2 v2.7.0
 	github.com/katzenpost/hpqc v0.0.42
 	github.com/stretchr/testify v1.8.4
 	gitlab.com/yawning/bsaes.git v0.0.0-20190805113838-0a714cd429ec
@@ -22,6 +22,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	gitlab.com/elixxir/crypto v0.0.9 // indirect
 	gitlab.com/xx_network/crypto v0.0.6 // indirect
 	golang.org/x/sys v0.16.0 // indirect

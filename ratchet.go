@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"github.com/katzenpost/hpqc/kem"
 	"github.com/katzenpost/hpqc/kem/schemes"
 )
@@ -16,6 +18,9 @@ import (
 const (
 	RatchetSeedSize = CKA_SeedSize + PRF_PRNG_Keysize
 )
+
+// Create reusable EncMode interface with immutable options, safe for concurrent use.
+var ccbor cbor.EncMode
 
 type header struct {
 	cur        uint32
@@ -64,14 +69,31 @@ type Ratchet struct {
 	states map[uint32]*ForwardSecureAEAD
 
 	root *PRF_PRNG
-	cka  *CKA
+	cka  *CKAState
 
 	currentMessage *CKAMessage
 
 	prev uint32
 	cur  uint32
 
-	scheme kem.Scheme
+	schemeName string
+}
+
+func FromBlob(b []byte) (*Ratchet, error) {
+	r := &Ratchet{
+		states: make(map[uint32]*ForwardSecureAEAD),
+		root:   &PRF_PRNG{},
+		cka:    &CKAState{},
+	}
+	err := cbor.Unmarshal(b, r)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *Ratchet) Marshal() ([]byte, error) {
+	return ccbor.Marshal(r)
 }
 
 func New(seed []byte, isA bool) (*Ratchet, error) {
@@ -116,11 +138,11 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 		// tcur ← 0
 		cur: 0,
 
-		scheme: s,
-		isA:    isA,
-		states: states,
-		root:   rng,
-		cka:    cka,
+		schemeName: s.Name(),
+		isA:        isA,
+		states:     states,
+		root:       rng,
+		cka:        cka,
 	}, nil
 }
 
@@ -194,34 +216,29 @@ func (r *Ratchet) Send(message []byte) []byte {
 	return append(ad, ciphertext...)
 }
 
+func assert(b bool) {
+	if !b {
+		panic("assertion failure")
+	}
+}
+
 // Receive decrypts the ciphertext and returns the plaintext or an error.
 func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 	// (h, e) ← c
-	ad := ciphertext[:headerSize(r.scheme)+4]
-	ciphertext = ciphertext[4+headerSize(r.scheme):]
+	ad := ciphertext[:headerSize(r.cka.scheme)+4]
+	ciphertext = ciphertext[4+headerSize(r.cka.scheme):]
 
 	// (t, T, `) ← h
-	myHeader, err := headerFromBinary(r.scheme, ad[4:])
+	myHeader, err := headerFromBinary(r.cka.scheme, ad[4:])
 	if err != nil {
 		return nil, err
 	}
 
 	// req t even and t ≤ tcur + 1
-	checkEven := false
-	if r.isA == false {
-		checkEven = true
-	}
-	isEven := false
-	if r.cur != 0 && (r.cur%2) == 0 {
-		isEven = true
-	}
-	switch {
-	case checkEven == true && isEven == true:
-		fallthrough
-	case checkEven == false && isEven == false:
-		if myHeader.cur > r.cur {
-			panic("Receive: header.cur out of bounds")
-		}
+	if r.isA {
+		assert(myHeader.cur%2 == 0 && myHeader.cur <= (r.cur+1))
+	} else {
+		assert(myHeader.cur%2 == 1 && myHeader.cur <= (r.cur+1))
 	}
 
 	// if t = tcur + 1
@@ -230,7 +247,7 @@ func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 		r.cur++
 
 		// FS-Max(v[t − 2], `)
-		if r.cur != 1 {
+		if r.cur != 1 && r.cur != 2 {
 			r.states[myHeader.cur-2].Max(r.prev)
 		}
 
@@ -254,4 +271,13 @@ func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 		return nil, err
 	}
 	return plaintext, nil
+}
+
+func init() {
+	var err error
+	opts := cbor.CanonicalEncOptions()
+	ccbor, err = opts.EncMode()
+	if err != nil {
+		panic(err)
+	}
 }
