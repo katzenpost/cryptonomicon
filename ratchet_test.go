@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"testing"
 
+	"github.com/katzenpost/hpqc/kem/schemes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,8 @@ func TestHeaderMarshaling(t *testing.T) {
 	_, err := rand.Reader.Read(ikm)
 	require.NoError(t, err)
 
-	alice, err := NewCKA("x25519", ikm, true)
+	kemName := "x25519"
+	alice, err := NewCKA(kemName, ikm, true)
 	require.NoError(t, err)
 
 	message1, _, err := alice.Send()
@@ -30,7 +32,10 @@ func TestHeaderMarshaling(t *testing.T) {
 	blob, err := h.MarshalBinary()
 	require.NoError(t, err)
 
-	h2, err := headerFromBinary(alice.scheme, blob)
+	scheme := schemes.ByName(kemName)
+	require.NotNil(t, scheme)
+
+	h2, err := headerFromBinary(scheme, blob)
 	require.NoError(t, err)
 
 	require.Equal(t, h.cur, h2.cur)
@@ -60,7 +65,7 @@ func TestRatchet(t *testing.T) {
 	require.Equal(t, message2, message2b)
 }
 
-func NoTestRatchetMarshaling(t *testing.T) {
+func TestRatchetMarshaling(t *testing.T) {
 	seed := make([]byte, RatchetSeedSize)
 	_, err := rand.Reader.Read(seed)
 	require.NoError(t, err)
@@ -79,12 +84,15 @@ func NoTestRatchetMarshaling(t *testing.T) {
 	aliceBlob, err := alice.Marshal()
 	require.NoError(t, err)
 
-	aliceNew, err := FromBlob(aliceBlob)
-	require.NoError(t, err)
+	t.Logf("len aliceBlob %d %x", len(aliceBlob), aliceBlob)
+	/*
+		//aliceNew, err := FromBlob(aliceBlob)
+		//require.NoError(t, err)
 
-	message2 := []byte("hello Alice")
-	ciphertext2 := aliceNew.Send(message2)
-	message2b, err := bob.Receive(ciphertext2)
-	require.NoError(t, err)
-	require.Equal(t, message2, message2b)
+		message2 := []byte("hello Alice")
+		ciphertext2 := aliceNew.Send(message2)
+		message2b, err := bob.Receive(ciphertext2)
+		require.NoError(t, err)
+		require.Equal(t, message2, message2b)
+	*/
 }

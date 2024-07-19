@@ -35,13 +35,7 @@ func TestCKAMessageMarshaling(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, message1.Ciphertext, message2.Ciphertext)
-
-	pubkey1raw, err := message1.PublicKey.MarshalBinary()
-	require.NoError(t, err)
-	pubkey2raw, err := message2.PublicKey.MarshalBinary()
-	require.NoError(t, err)
-
-	require.Equal(t, pubkey1raw, pubkey2raw)
+	require.Equal(t, message1.PublicKey, message2.PublicKey)
 }
 
 func TestCKA(t *testing.T) {

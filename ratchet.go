@@ -224,12 +224,17 @@ func assert(b bool) {
 
 // Receive decrypts the ciphertext and returns the plaintext or an error.
 func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
+	scheme := schemes.ByName(r.cka.KEMSchemeName)
+	if scheme == nil {
+		panic("nil KEM scheme")
+	}
+
 	// (h, e) ← c
-	ad := ciphertext[:headerSize(r.cka.scheme)+4]
-	ciphertext = ciphertext[4+headerSize(r.cka.scheme):]
+	ad := ciphertext[:headerSize(scheme)+4]
+	ciphertext = ciphertext[4+headerSize(scheme):]
 
 	// (t, T, `) ← h
-	myHeader, err := headerFromBinary(r.cka.scheme, ad[4:])
+	myHeader, err := headerFromBinary(scheme, ad[4:])
 	if err != nil {
 		return nil, err
 	}

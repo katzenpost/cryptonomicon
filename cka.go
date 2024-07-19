@@ -25,16 +25,14 @@ var (
 // CKAState is a state type used by the CKA.
 type CKAState struct {
 	// PublicKey is the KEM public key.
-	PublicKey kem.PublicKey
+	PublicKey []byte
 
 	// PrivateKey is the KEM private key.
-	PrivateKey kem.PrivateKey
+	PrivateKey []byte
 
 	// KEMSchemeName is the unique name for the KEM scheme being used
 	// from the HPQC cryptography library.
 	KEMSchemeName string
-
-	scheme kem.Scheme
 }
 
 // NewCKAState constructs a new SKAState given a keypair.
@@ -43,18 +41,30 @@ func NewCKAState(publicKey kem.PublicKey, privateKey kem.PrivateKey, kemName str
 	if s == nil {
 		return nil, fmt.Errorf("KEM scheme '%s' not supported", kemName)
 	}
-	return &CKAState{
-		PublicKey:     publicKey,
-		PrivateKey:    privateKey,
+	state := &CKAState{
 		KEMSchemeName: kemName,
-		scheme:        s,
-	}, nil
+	}
+	if publicKey != nil {
+		pubblob, err := publicKey.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		state.PublicKey = pubblob
+	}
+	if privateKey != nil {
+		privblob, err := privateKey.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		state.PrivateKey = privblob
+	}
+	return state, nil
 }
 
 // CKAMessage encapsulates a CKA Message.
 type CKAMessage struct {
 	// PublicKey is the new KEM public key.
-	PublicKey kem.PublicKey
+	PublicKey []byte
 	// Ciphertext is the new KEM ciphertext.
 	Ciphertext []byte
 }
@@ -62,24 +72,20 @@ type CKAMessage struct {
 func ckaMessageFromBinary(scheme kem.Scheme, b []byte) (*CKAMessage, error) {
 	offset := scheme.PublicKeySize()
 	pubkeyRaw := b[:offset]
-	pubkey, err := scheme.UnmarshalBinaryPublicKey(pubkeyRaw)
+	_, err := scheme.UnmarshalBinaryPublicKey(pubkeyRaw)
 	if err != nil {
 		return nil, err
 	}
 	ciphertext := b[offset:]
 
 	return &CKAMessage{
-		PublicKey:  pubkey,
+		PublicKey:  pubkeyRaw,
 		Ciphertext: ciphertext,
 	}, nil
 }
 
 func (c *CKAMessage) MarshalBinary() ([]byte, error) {
-	pubkeyBlob, err := c.PublicKey.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	return append(pubkeyBlob, c.Ciphertext...), nil
+	return append(c.PublicKey, c.Ciphertext...), nil
 }
 
 // NewCKA returns a newly constructed CKA.
@@ -116,28 +122,55 @@ func NewCKA(kemName string, ikm []byte, isInitiator bool) (*CKAState, error) {
 
 // Send performs the CKA Send operation.
 func (c *CKAState) Send() (*CKAMessage, []byte, error) {
-	ct, sharedSecret, err := c.scheme.Encapsulate(c.PublicKey)
+	scheme := schemes.ByName(c.KEMSchemeName)
+	if scheme == nil {
+		panic("nil KEM scheme")
+	}
+	publicKey, err := scheme.UnmarshalBinaryPublicKey(c.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
-	pubkey, privkey, err := c.scheme.GenerateKeyPair()
+	ct, sharedSecret, err := scheme.Encapsulate(publicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	pubkey, privkey, err := scheme.GenerateKeyPair()
+	if err != nil {
+		return nil, nil, err
+	}
+	pubblob, err := pubkey.MarshalBinary()
 	if err != nil {
 		return nil, nil, err
 	}
 	m := &CKAMessage{
 		Ciphertext: ct,
-		PublicKey:  pubkey,
+		PublicKey:  pubblob,
 	}
-	c.PrivateKey = privkey
+	c.PrivateKey, err = privkey.MarshalBinary()
+	if err != nil {
+		return nil, nil, err
+	}
 	return m, sharedSecret, nil
 }
 
 // Receive performs the CKA Receive operation.
 func (c *CKAState) Receive(message *CKAMessage) ([]byte, error) {
-	sharedSecret, err := c.scheme.Decapsulate(c.PrivateKey, message.Ciphertext)
+	scheme := schemes.ByName(c.KEMSchemeName)
+	if scheme == nil {
+		panic("nil KEM scheme")
+	}
+	privateKey, err := scheme.UnmarshalBinaryPrivateKey(c.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	sharedSecret, err := scheme.Decapsulate(privateKey, message.Ciphertext)
 	if err != nil {
 		return nil, err
 	}
 	c.PublicKey = message.PublicKey
+	_, err = scheme.UnmarshalBinaryPublicKey(message.PublicKey)
+	if err != nil {
+		return nil, err
+	}
 	return sharedSecret, nil
 }
