@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/katzenpost/hpqc/kem/schemes"
 	"github.com/stretchr/testify/require"
 )
@@ -25,14 +26,28 @@ func TestCKAMessageMarshaling(t *testing.T) {
 	message1, _, err := alice.Send()
 	require.NoError(t, err)
 
-	blob1, err := message1.MarshalBinary()
+	blob1, err := ccbor.Marshal(message1)
 	require.NoError(t, err)
 
 	scheme := schemes.ByName(kemName)
 	require.NotNil(t, scheme)
 
-	message2, err := ckaMessageFromBinary(scheme, blob1)
+	message2 := &CKAMessage{}
+	err = cbor.Unmarshal(blob1, message2)
 	require.NoError(t, err)
+
+	estimatedCKAMessageSize := scheme.CiphertextSize() + scheme.PublicKeySize()
+
+	/*
+		t.Logf("CKA message size %d, ", len(blob1))
+		t.Logf("CKA MESSAGE RAW IS %x", blob1)
+		t.Logf("CKA MESSAGE PUB KEY %x", message1.PublicKey)
+		t.Logf("CKA MESSAGE CIPHERTEXT %x", message1.Ciphertext)
+		t.Logf("estimatedCKAMessageSize %d", estimatedCKAMessageSize)
+		t.Logf("diff %d", len(blob1)-estimatedCKAMessageSize)
+	*/
+
+	require.Equal(t, len(blob1)-estimatedCKAMessageSize, CBOROverhead)
 
 	require.Equal(t, message1.Ciphertext, message2.Ciphertext)
 	require.Equal(t, message1.PublicKey, message2.PublicKey)

@@ -38,6 +38,8 @@ func TestHeaderMarshaling(t *testing.T) {
 	h2, err := headerFromBinary(scheme, blob)
 	require.NoError(t, err)
 
+	require.Equal(t, len(blob), headerSize(scheme))
+
 	require.Equal(t, h.EpochCount, h2.EpochCount)
 	require.Equal(t, h.PrevSendCount, h2.PrevSendCount)
 }
@@ -94,5 +96,4 @@ func TestRatchetMarshaling(t *testing.T) {
 	message2b, err := bob.Receive(ciphertext2)
 	require.NoError(t, err)
 	require.Equal(t, message2, message2b)
-
 }

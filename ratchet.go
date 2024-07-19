@@ -28,15 +28,18 @@ type header struct {
 	CKAMessage    *CKAMessage
 }
 
+// XXX FIX ME ---> ADD CBOR OVERHEAD
 func headerSize(scheme kem.Scheme) int {
-	return 4 + 4 + scheme.CiphertextSize() + scheme.PublicKeySize()
+	return 4 + 4 + scheme.CiphertextSize() + scheme.PublicKeySize() + CBOROverhead
 }
 
 func headerFromBinary(scheme kem.Scheme, b []byte) (*header, error) {
 	cur := binary.BigEndian.Uint32(b[:4])
 	prev := binary.BigEndian.Uint32(b[4:8])
 	ckaMessageBlob := b[8:]
-	ckaMessage, err := ckaMessageFromBinary(scheme, ckaMessageBlob)
+
+	ckaMessage := &CKAMessage{}
+	err := cbor.Unmarshal(ckaMessageBlob, ckaMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,7 @@ func (h *header) MarshalBinary() ([]byte, error) {
 	prevRaw := make([]byte, 4)
 	binary.BigEndian.PutUint32(prevRaw, h.PrevSendCount)
 
-	ckaMessageBlob, err := h.CKAMessage.MarshalBinary()
+	ckaMessageBlob, err := ccbor.Marshal(h.CKAMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +84,10 @@ type Ratchet struct {
 
 func FromBlob(b []byte) (*Ratchet, error) {
 	r := &Ratchet{
-		States:   make(map[uint32]*ForwardSecureAEAD),
-		Root:     &PRF_PRNG{},
-		CKAState: &CKAState{},
+		States:         make(map[uint32]*ForwardSecureAEAD),
+		Root:           &PRF_PRNG{},
+		CKAState:       &CKAState{},
+		CurrentMessage: &CKAMessage{},
 	}
 	err := cbor.Unmarshal(b, r)
 	if err != nil {
