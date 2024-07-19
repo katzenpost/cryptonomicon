@@ -23,9 +23,9 @@ const (
 var ccbor cbor.EncMode
 
 type header struct {
-	cur        uint32
-	prev       uint32
-	ckaMessage *CKAMessage
+	EpochCount    uint32
+	PrevSendCount uint32
+	CKAMessage    *CKAMessage
 }
 
 func headerSize(scheme kem.Scheme) int {
@@ -42,20 +42,20 @@ func headerFromBinary(scheme kem.Scheme, b []byte) (*header, error) {
 	}
 
 	return &header{
-		cur:        cur,
-		prev:       prev,
-		ckaMessage: ckaMessage,
+		EpochCount:    cur,
+		PrevSendCount: prev,
+		CKAMessage:    ckaMessage,
 	}, nil
 }
 
 func (h *header) MarshalBinary() ([]byte, error) {
 	curRaw := make([]byte, 4)
-	binary.BigEndian.PutUint32(curRaw, h.cur)
+	binary.BigEndian.PutUint32(curRaw, h.EpochCount)
 
 	prevRaw := make([]byte, 4)
-	binary.BigEndian.PutUint32(prevRaw, h.prev)
+	binary.BigEndian.PutUint32(prevRaw, h.PrevSendCount)
 
-	ckaMessageBlob, err := h.ckaMessage.MarshalBinary()
+	ckaMessageBlob, err := h.CKAMessage.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
@@ -64,26 +64,26 @@ func (h *header) MarshalBinary() ([]byte, error) {
 }
 
 type Ratchet struct {
-	isA bool
+	IsA bool
 
-	states map[uint32]*ForwardSecureAEAD
+	States map[uint32]*ForwardSecureAEAD
 
-	root *PRF_PRNG
-	cka  *CKAState
+	Root     *PRF_PRNG
+	CKAState *CKAState
 
-	currentMessage *CKAMessage
+	CurrentMessage *CKAMessage
 
-	prev uint32
-	cur  uint32
+	PrevSendCount uint32
+	EpochCount    uint32
 
-	schemeName string
+	KEMSchemeName string
 }
 
 func FromBlob(b []byte) (*Ratchet, error) {
 	r := &Ratchet{
-		states: make(map[uint32]*ForwardSecureAEAD),
-		root:   &PRF_PRNG{},
-		cka:    &CKAState{},
+		States:   make(map[uint32]*ForwardSecureAEAD),
+		Root:     &PRF_PRNG{},
+		CKAState: &CKAState{},
 	}
 	err := cbor.Unmarshal(b, r)
 	if err != nil {
@@ -134,26 +134,26 @@ func New(seed []byte, isA bool) (*Ratchet, error) {
 
 	return &Ratchet{
 		// `prv ← 0
-		prev: 0,
+		PrevSendCount: 0,
 		// tcur ← 0
-		cur: 0,
+		EpochCount: 0,
 
-		schemeName: s.Name(),
-		isA:        isA,
-		states:     states,
-		root:       rng,
-		cka:        cka,
+		KEMSchemeName: s.Name(),
+		IsA:           isA,
+		States:        states,
+		Root:          rng,
+		CKAState:      cka,
 	}, nil
 }
 
 // Send comsumes the given message and returns a ciphertext.
 func (r *Ratchet) Send(message []byte) []byte {
 	checkEven := false
-	if r.isA == true {
+	if r.IsA == true {
 		checkEven = true
 	}
 	isEven := false
-	if (r.cur % 2) == 0 {
+	if (r.EpochCount % 2) == 0 {
 		isEven = true
 	}
 	doUpdate := false
@@ -165,45 +165,45 @@ func (r *Ratchet) Send(message []byte) []byte {
 	}
 
 	if doUpdate {
-		if r.cur != 0 && r.cur != 1 {
+		if r.EpochCount != 0 && r.EpochCount != 1 {
 			// `prv ← FS-Stop(v[tcur − 1])
-			state, ok := r.states[r.cur-1]
+			state, ok := r.States[r.EpochCount-1]
 			if !ok {
 				panic("failed to find map entry")
 			}
-			r.prev = state.Stop()
+			r.PrevSendCount = state.Stop()
 		}
 
 		// tcur++
-		r.cur++
+		r.EpochCount++
 
 		// (γ, Tcur, I) ←$ CKA-S(γ)
-		currentMessage, sharedSecret, err := r.cka.Send()
-		r.currentMessage = currentMessage
+		currentMessage, sharedSecret, err := r.CKAState.Send()
+		r.CurrentMessage = currentMessage
 		if err != nil {
 			panic(err)
 		}
 
 		// (σroot, k) ← P-Up(σroot, I)
-		seed := r.root.Up(sharedSecret)
+		seed := r.Root.Up(sharedSecret)
 
 		// v[tcur] ← FS-Init-S(k)
 		fs, err := NewFSAEAD(seed, true)
 		if err != nil {
 			panic(err)
 		}
-		r.states[r.cur] = fs
+		r.States[r.EpochCount] = fs
 	}
 
 	// h ← (tcur, Tcur, `prv)
 	countRaw := make([]byte, 4)
-	binary.BigEndian.PutUint32(countRaw, r.cur)
+	binary.BigEndian.PutUint32(countRaw, r.EpochCount)
 	prevRaw := make([]byte, 4)
-	binary.BigEndian.PutUint32(prevRaw, r.prev)
+	binary.BigEndian.PutUint32(prevRaw, r.PrevSendCount)
 	myHeader := &header{
-		cur:        r.cur,
-		prev:       r.prev,
-		ckaMessage: r.currentMessage,
+		EpochCount:    r.EpochCount,
+		PrevSendCount: r.PrevSendCount,
+		CKAMessage:    r.CurrentMessage,
 	}
 	ad, err := myHeader.MarshalBinary()
 	if err != nil {
@@ -211,7 +211,7 @@ func (r *Ratchet) Send(message []byte) []byte {
 	}
 
 	// (v[tcur], e) ← FS-Send(v[tcur], h, m)
-	fs := r.states[r.cur]
+	fs := r.States[r.EpochCount]
 	ad, ciphertext := fs.Send(message, ad)
 	return append(ad, ciphertext...)
 }
@@ -224,7 +224,7 @@ func assert(b bool) {
 
 // Receive decrypts the ciphertext and returns the plaintext or an error.
 func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
-	scheme := schemes.ByName(r.cka.KEMSchemeName)
+	scheme := schemes.ByName(r.CKAState.KEMSchemeName)
 	if scheme == nil {
 		panic("nil KEM scheme")
 	}
@@ -240,38 +240,38 @@ func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 	}
 
 	// req t even and t ≤ tcur + 1
-	if r.isA {
-		assert(myHeader.cur%2 == 0 && myHeader.cur <= (r.cur+1))
+	if r.IsA {
+		assert(myHeader.EpochCount%2 == 0 && myHeader.EpochCount <= (r.EpochCount+1))
 	} else {
-		assert(myHeader.cur%2 == 1 && myHeader.cur <= (r.cur+1))
+		assert(myHeader.EpochCount%2 == 1 && myHeader.EpochCount <= (r.EpochCount+1))
 	}
 
 	// if t = tcur + 1
-	if myHeader.cur == r.cur+1 {
+	if myHeader.EpochCount == r.EpochCount+1 {
 		// tcur ++
-		r.cur++
+		r.EpochCount++
 
 		// FS-Max(v[t − 2], `)
-		if r.cur != 1 && r.cur != 2 {
-			r.states[myHeader.cur-2].Max(r.prev)
+		if r.EpochCount != 1 && r.EpochCount != 2 {
+			r.States[myHeader.EpochCount-2].Max(r.PrevSendCount)
 		}
 
 		// (γ, I) ← CKA-R(γ, T)
-		sharedSecret, err := r.cka.Receive(myHeader.ckaMessage)
+		sharedSecret, err := r.CKAState.Receive(myHeader.CKAMessage)
 		if err != nil {
 			return nil, err
 		}
 		// (σroot, k) ← P-Up(σroot, I)
-		key := r.root.Up(sharedSecret)
+		key := r.Root.Up(sharedSecret)
 		// v[t] ← FS-Init-R(k)
-		r.states[myHeader.cur], err = NewFSAEAD(key, false)
+		r.States[myHeader.EpochCount], err = NewFSAEAD(key, false)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	// (v[t], i, m) ← FS-Rcv(v[t], h, e)
-	plaintext, err := r.states[myHeader.cur].Receive(ciphertext, ad)
+	plaintext, err := r.States[myHeader.EpochCount].Receive(ciphertext, ad)
 	if err != nil {
 		return nil, err
 	}

@@ -25,9 +25,9 @@ func TestHeaderMarshaling(t *testing.T) {
 	require.NoError(t, err)
 
 	h := &header{
-		cur:        123,
-		prev:       123,
-		ckaMessage: message1,
+		EpochCount:    123,
+		PrevSendCount: 123,
+		CKAMessage:    message1,
 	}
 	blob, err := h.MarshalBinary()
 	require.NoError(t, err)
@@ -38,8 +38,8 @@ func TestHeaderMarshaling(t *testing.T) {
 	h2, err := headerFromBinary(scheme, blob)
 	require.NoError(t, err)
 
-	require.Equal(t, h.cur, h2.cur)
-	require.Equal(t, h.prev, h2.prev)
+	require.Equal(t, h.EpochCount, h2.EpochCount)
+	require.Equal(t, h.PrevSendCount, h2.PrevSendCount)
 }
 
 func TestRatchet(t *testing.T) {
@@ -85,14 +85,14 @@ func TestRatchetMarshaling(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("len aliceBlob %d %x", len(aliceBlob), aliceBlob)
-	/*
-		//aliceNew, err := FromBlob(aliceBlob)
-		//require.NoError(t, err)
 
-		message2 := []byte("hello Alice")
-		ciphertext2 := aliceNew.Send(message2)
-		message2b, err := bob.Receive(ciphertext2)
-		require.NoError(t, err)
-		require.Equal(t, message2, message2b)
-	*/
+	aliceNew, err := FromBlob(aliceBlob)
+	require.NoError(t, err)
+
+	message2 := []byte("hello Alice")
+	ciphertext2 := aliceNew.Send(message2)
+	message2b, err := bob.Receive(ciphertext2)
+	require.NoError(t, err)
+	require.Equal(t, message2, message2b)
+
 }
