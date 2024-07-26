@@ -70,29 +70,6 @@ type CKAMessage struct {
 	Ciphertext []byte
 }
 
-/*
-func ckaMessageFromBinary(scheme kem.Scheme, b []byte) (*CKAMessage, error) {
-	offset := scheme.PublicKeySize()
-	pubkeyRaw := b[:offset]
-	_, err := scheme.UnmarshalBinaryPublicKey(pubkeyRaw)
-	if err != nil {
-		return nil, err
-	}
-	ciphertext := b[offset:]
-
-	return &CKAMessage{
-		PublicKey:  pubkeyRaw,
-		Ciphertext: ciphertext,
-	}, nil
-}
-*/
-
-/*
-func (c *CKAMessage) MarshalBinary() ([]byte, error) {
-	return append(c.PublicKey, c.Ciphertext...), nil
-}
-*/
-
 // NewCKA returns a newly constructed CKA.
 func NewCKA(kemName string, ikm []byte, isInitiator bool) (*CKAState, error) {
 	if len(ikm) != CKA_SeedSize {

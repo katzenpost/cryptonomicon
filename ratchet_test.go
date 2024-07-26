@@ -90,6 +90,7 @@ func TestRatchetMarshaling(t *testing.T) {
 
 	aliceNew, err := FromBlob(aliceBlob)
 	require.NoError(t, err)
+	require.NotNil(t, aliceNew)
 
 	message2 := []byte("hello Alice")
 	ciphertext2 := aliceNew.Send(message2)

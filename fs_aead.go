@@ -10,10 +10,9 @@ import (
 	"errors"
 	"hash"
 
+	"gitlab.com/yawning/bsaes.git"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
-
-	"gitlab.com/yawning/bsaes.git"
 
 	"github.com/katzenpost/hpqc/util"
 )
@@ -48,39 +47,47 @@ type resetable interface {
 
 // Stream is the Sphinx stream cipher.
 type Stream struct {
-	cipher.Stream
+	Key *[StreamKeyLength]byte
+	Iv  *[StreamIVLength]byte
 }
 
 // NewStream returns a new Stream implementing the Sphinx Stream Cipher with
 // the provided key and IV.
 func NewStream(key *[StreamKeyLength]byte, iv *[StreamIVLength]byte) *Stream {
-	// bsaes is smart enough to detect if the Go runtime and the CPU support
-	// AES-NI and PCLMULQDQ and call `crypto/aes`.
-	//
-	// TODO: The AES-NI `crypto/aes` CTR mode implementation is horrid and
-	// massively underperforms so eventually bsaes should include assembly.
-	blk, err := bsaes.NewCipher(key[:])
-	if err != nil {
-		// Not covered by unit tests because this indicates a bug in bsaes.
-		panic("crypto/NewStream: failed to create AES instance: " + err.Error())
+	return &Stream{
+		Key: key,
+		Iv:  iv,
 	}
-	return &Stream{cipher.NewCTR(blk, iv[:])}
 }
 
 // KeyStream fills the buffer dst with key stream output.
 func (s *Stream) KeyStream(dst []byte) {
+	blk, err := bsaes.NewCipher(s.Key[:])
+	if err != nil {
+		// Not covered by unit tests because this indicates a bug in bsaes.
+		panic("crypto/NewStream: failed to create AES instance: " + err.Error())
+	}
+	cipher := cipher.NewCTR(blk, s.Iv[:])
+
 	// TODO: Add a fast path for implementations that support it, to
 	// shave off the memset and XOR.
 	util.ExplicitBzero(dst)
-	s.XORKeyStream(dst, dst)
+	cipher.XORKeyStream(dst, dst)
 }
 
 // Reset clears the Stream instance such that no sensitive data is left in
 // memory.
 func (s *Stream) Reset() {
+	blk, err := bsaes.NewCipher(s.Key[:])
+	if err != nil {
+		// Not covered by unit tests because this indicates a bug in bsaes.
+		panic("crypto/NewStream: failed to create AES instance: " + err.Error())
+	}
+	cipher := cipher.NewCTR(blk, s.Iv[:])
+
 	// bsaes's ctrAble implementation exposes this, `crypto/aes` does not,
 	// c'est la vie.
-	if r, ok := s.Stream.(resetable); ok {
+	if r, ok := cipher.(resetable); ok {
 		r.Reset()
 	}
 }
@@ -97,16 +104,17 @@ func (s *Stream) Reset() {
 // evident from its security deﬁnition, which resembles that of SM
 // schemes."
 type ForwardSecureAEAD struct {
-	prg  *Stream
-	aead cipher.AEAD
+	PRG *Stream
 
-	keyStorage map[uint32][]byte
+	AEADKey *[chacha20poly1305.KeySize]byte
 
-	receiveCount uint32
-	receiveMax   uint32
+	KeyStorage map[uint32][]byte
 
-	sendCount uint32
-	sendMax   uint32
+	ReceiveCount uint32
+	ReceiveMax   uint32
+
+	SendCount uint32
+	SendMax   uint32
 }
 
 func deriveKey(key []byte, label []byte, h hash.Hash) {
@@ -138,74 +146,71 @@ func NewFSAEAD(seed []byte, isSender bool) (*ForwardSecureAEAD, error) {
 	}
 
 	return &ForwardSecureAEAD{
-		prg:          NewStream(prgKey, prgIV),
-		aead:         nil,
-		keyStorage:   keyStorage,
-		receiveMax:   defaultMaxReceive,
-		receiveCount: 0,
-		sendMax:      defaultMaxSend,
-		sendCount:    0,
+		PRG:          NewStream(prgKey, prgIV),
+		AEADKey:      nil,
+		KeyStorage:   keyStorage,
+		ReceiveMax:   defaultMaxReceive,
+		ReceiveCount: 0,
+		SendMax:      defaultMaxSend,
+		SendCount:    0,
 	}, nil
 }
 
 // Send implements the FSAEAD send op.
 func (f *ForwardSecureAEAD) Send(message, ad []byte) ([]byte, []byte) {
 	// iA ++
-	f.sendCount++
+	f.SendCount++
 
 	// (w, K) ← G(w)
-	f.updateState(true)
+	f.updateState()
 
 	// h ← (iA , a)
 	adPrefix := make([]byte, 4)
-	binary.BigEndian.PutUint32(adPrefix, f.sendCount)
+	binary.BigEndian.PutUint32(adPrefix, f.SendCount)
 
 	// e ← Enc(K, h, m)
 	// return (iA , e)
-	nonce := make([]byte, f.aead.NonceSize())
+	aead, err := chacha20poly1305.New(f.AEADKey[:])
+	if err != nil {
+		panic(err)
+	}
+	nonce := make([]byte, aead.NonceSize())
 	ad = append(adPrefix, ad...)
-	return ad, f.aead.Seal(nil, nonce, message, ad)
+	return ad, aead.Seal(nil, nonce, message, ad)
 }
 
 func (f *ForwardSecureAEAD) trySkipped(index uint32) []byte {
-	k, ok := f.keyStorage[index]
+	k, ok := f.KeyStorage[index]
 	if ok {
-		delete(f.keyStorage, index)
+		delete(f.KeyStorage, index)
 		return k
 	}
 	return nil
 }
 
-func (f *ForwardSecureAEAD) updateState(isSender bool) []byte {
+func (f *ForwardSecureAEAD) updateState() {
 	stream := make([]byte, FSAEADSeedLength)
-	f.prg.KeyStream(stream)
+	f.PRG.KeyStream(stream)
 
 	prgKey := &[StreamKeyLength]byte{}
 	copy(prgKey[:], stream[:StreamKeyLength])
 	prgIv := &[StreamIVLength]byte{}
 	copy(prgIv[:], stream[StreamKeyLength:symmetricKeySize+StreamIVLength])
 
-	f.prg = NewStream(prgKey, prgIv)
-
-	aeadKey := make([]byte, chacha20poly1305.KeySize)
-	copy(aeadKey, stream[symmetricKeySize+StreamIVLength:])
-
-	var err error
-	f.aead, err = chacha20poly1305.New(aeadKey)
-	if err != nil {
-		panic(err)
-	}
-	return aeadKey
+	f.PRG = NewStream(prgKey, prgIv)
+	key := [chacha20poly1305.KeySize]byte{}
+	copy(key[:], stream[symmetricKeySize+StreamIVLength:])
+	f.AEADKey = &key
 }
 
 func (f *ForwardSecureAEAD) skip(count uint32) {
 	if count == 0 {
 		return
 	}
-	for f.receiveCount < count-1 {
-		f.receiveCount++
-		aeadKey := f.updateState(false)
-		f.keyStorage[count] = aeadKey
+	for f.ReceiveCount < count-1 {
+		f.ReceiveCount++
+		f.updateState()
+		f.KeyStorage[count] = f.AEADKey[:]
 	}
 }
 
@@ -222,17 +227,21 @@ func (f *ForwardSecureAEAD) Receive(ciphertext, ad []byte) ([]byte, error) {
 		// skip(i)
 		f.skip(receiveCount)
 		// (w, K) ← G(w)
-		f.updateState(false)
+		f.updateState()
 		// iB ← i
-		f.receiveCount = receiveCount
+		f.ReceiveCount = receiveCount
 	}
 
 	// h ← (i, a)
 	newAdPrefix := make([]byte, 4)
 	binary.BigEndian.PutUint32(newAdPrefix, receiveCount)
 	// m ← Dec(K, h, e)
-	nonce := make([]byte, f.aead.NonceSize())
-	plaintext, err := f.aead.Open(nil, nonce, ciphertext, ad)
+	aead, err := chacha20poly1305.New(f.AEADKey[:])
+	if err != nil {
+		panic(err)
+	}
+	nonce := make([]byte, aead.NonceSize())
+	plaintext, err := aead.Open(nil, nonce, ciphertext, ad)
 	if err != nil {
 		return nil, err
 	}
@@ -242,16 +251,15 @@ func (f *ForwardSecureAEAD) Receive(ciphertext, ad []byte) ([]byte, error) {
 // memory management methods
 
 func (f *ForwardSecureAEAD) Stop() uint32 {
-	count := f.receiveCount
-	f.keyStorage = make(map[uint32][]byte)
-	f.prg = nil
-	f.aead = nil
-	f.sendCount = 0
-	f.receiveCount = 0
+	count := f.ReceiveCount
+	f.KeyStorage = make(map[uint32][]byte)
+	f.PRG = nil
+	f.SendCount = 0
+	f.ReceiveCount = 0
 	return count
 }
 
 func (f *ForwardSecureAEAD) Max(max uint32) {
-	f.receiveMax = max
-	f.sendMax = max
+	f.ReceiveMax = max
+	f.SendMax = max
 }

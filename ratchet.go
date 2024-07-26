@@ -216,6 +216,9 @@ func (r *Ratchet) Send(message []byte) []byte {
 
 	// (v[tcur], e) ← FS-Send(v[tcur], h, m)
 	fs := r.States[r.EpochCount]
+	if fs == nil {
+		panic("fs aead is nil")
+	}
 	ad, ciphertext := fs.Send(message, ad)
 	return append(ad, ciphertext...)
 }
