@@ -60,6 +60,15 @@ func NewStream(key *[StreamKeyLength]byte, iv *[StreamIVLength]byte) *Stream {
 	}
 }
 
+func (s *Stream) Reset() {
+	if s.Key != nil {
+		util.ExplicitBzero(s.Key[:])
+	}
+	if s.Iv != nil {
+		util.ExplicitBzero(s.Iv[:])
+	}
+}
+
 // KeyStream fills the buffer dst with key stream output.
 func (s *Stream) KeyStream(dst []byte) {
 	blk, err := bsaes.NewCipher(s.Key[:])
@@ -73,23 +82,6 @@ func (s *Stream) KeyStream(dst []byte) {
 	// shave off the memset and XOR.
 	util.ExplicitBzero(dst)
 	cipher.XORKeyStream(dst, dst)
-}
-
-// Reset clears the Stream instance such that no sensitive data is left in
-// memory.
-func (s *Stream) Reset() {
-	blk, err := bsaes.NewCipher(s.Key[:])
-	if err != nil {
-		// Not covered by unit tests because this indicates a bug in bsaes.
-		panic("crypto/NewStream: failed to create AES instance: " + err.Error())
-	}
-	cipher := cipher.NewCTR(blk, s.Iv[:])
-
-	// bsaes's ctrAble implementation exposes this, `crypto/aes` does not,
-	// c'est la vie.
-	if r, ok := cipher.(resetable); ok {
-		r.Reset()
-	}
 }
 
 // ForwardSecureAEAD is a forward-secure AEAD cipher as described in
@@ -154,6 +146,21 @@ func NewFSAEAD(seed []byte, isSender bool) (*ForwardSecureAEAD, error) {
 		SendMax:      defaultMaxSend,
 		SendCount:    0,
 	}, nil
+}
+
+func (f *ForwardSecureAEAD) Reset() {
+	if f.PRG != nil {
+		f.PRG.Reset()
+	}
+	util.ExplicitBzero(f.AEADKey[:])
+	for k, v := range f.KeyStorage {
+		util.ExplicitBzero(v)
+		delete(f.KeyStorage, k)
+	}
+	f.ReceiveCount = 0
+	f.ReceiveMax = 0
+	f.SendCount = 0
+	f.SendMax = 0
 }
 
 // Send implements the FSAEAD send op.

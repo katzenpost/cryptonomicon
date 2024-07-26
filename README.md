@@ -23,7 +23,7 @@ https://github.com/katzenpost/formal_specifications/blob/main/kem_ratchet/protot
 
 ## Status
 
-It works but I need to write more unit tests.
+It works.
 
 
 ## Cryptography suite

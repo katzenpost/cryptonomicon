@@ -12,13 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	kamSchemeName = "Xwing" // pick your favorite hybrid post quantum KEM
+)
+
 func TestHeaderMarshaling(t *testing.T) {
 	ikm := make([]byte, 64)
 	_, err := rand.Reader.Read(ikm)
 	require.NoError(t, err)
 
-	kemName := "x25519"
-	alice, err := NewCKA(kemName, ikm, true)
+	kamSchemeName := "x25519"
+	alice, err := NewCKA(kamSchemeName, ikm, true)
 	require.NoError(t, err)
 
 	message1, _, err := alice.Send()
@@ -32,7 +36,7 @@ func TestHeaderMarshaling(t *testing.T) {
 	blob, err := h.MarshalBinary()
 	require.NoError(t, err)
 
-	scheme := schemes.ByName(kemName)
+	scheme := schemes.ByName(kamSchemeName)
 	require.NotNil(t, scheme)
 
 	h2, err := headerFromBinary(scheme, blob)
@@ -86,8 +90,6 @@ func TestRatchetMarshaling(t *testing.T) {
 	aliceBlob, err := alice.Marshal()
 	require.NoError(t, err)
 
-	t.Logf("len aliceBlob %d %x", len(aliceBlob), aliceBlob)
-
 	aliceNew, err := FromBlob(aliceBlob)
 	require.NoError(t, err)
 	require.NotNil(t, aliceNew)
@@ -97,4 +99,28 @@ func TestRatchetMarshaling(t *testing.T) {
 	message2b, err := bob.Receive(ciphertext2)
 	require.NoError(t, err)
 	require.Equal(t, message2, message2b)
+}
+
+func pairedRatchet(t *testing.T) (*Ratchet, *Ratchet) {
+	seed := make([]byte, RatchetSeedSize)
+	_, err := rand.Reader.Read(seed)
+	require.NoError(t, err)
+
+	alice, err := New(seed, true)
+	require.NoError(t, err)
+	bob, err := New(seed, false)
+	require.NoError(t, err)
+
+	return alice, bob
+}
+
+func reinitRatchet(t *testing.T, r *Ratchet) *Ratchet {
+	state, err := r.Marshal()
+	require.NoError(t, err)
+	r.Reset()
+
+	newR, err := FromBlob(state)
+	require.NoError(t, err)
+
+	return newR
 }

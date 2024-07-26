@@ -13,6 +13,7 @@ import (
 
 	"github.com/katzenpost/hpqc/kem"
 	"github.com/katzenpost/hpqc/kem/schemes"
+	"github.com/katzenpost/hpqc/util"
 )
 
 const (
@@ -98,6 +99,27 @@ func FromBlob(b []byte) (*Ratchet, error) {
 
 func (r *Ratchet) Marshal() ([]byte, error) {
 	return ccbor.Marshal(r)
+}
+
+func (r *Ratchet) Reset() {
+	r.IsA = false
+	for k, v := range r.States {
+		if v != nil {
+			v.Reset()
+		}
+		delete(r.States, k)
+	}
+	util.ExplicitBzero(r.Root.state)
+	if r.CurrentMessage != nil {
+		if r.CurrentMessage.Ciphertext != nil {
+			util.ExplicitBzero(r.CurrentMessage.Ciphertext)
+		}
+		r.CurrentMessage.PublicKey = nil
+	}
+
+	r.PrevSendCount = 0
+	r.EpochCount = 0
+	r.KEMSchemeName = ""
 }
 
 func New(seed []byte, isA bool) (*Ratchet, error) {
