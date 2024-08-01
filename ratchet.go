@@ -71,7 +71,7 @@ type Ratchet struct {
 
 	States map[uint32]*ForwardSecureAEAD
 
-	Max uint32
+	Max      uint32
 	Root     *PRF_PRNG
 	CKAState *CKAState
 
