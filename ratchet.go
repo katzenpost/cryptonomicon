@@ -29,7 +29,6 @@ type header struct {
 	CKAMessage    *CKAMessage
 }
 
-// XXX FIX ME ---> ADD CBOR OVERHEAD
 func headerSize(scheme kem.Scheme) int {
 	return 4 + 4 + scheme.CiphertextSize() + scheme.PublicKeySize() + CBOROverhead
 }
@@ -72,6 +71,7 @@ type Ratchet struct {
 
 	States map[uint32]*ForwardSecureAEAD
 
+	Max uint32
 	Root     *PRF_PRNG
 	CKAState *CKAState
 
@@ -120,6 +120,11 @@ func (r *Ratchet) Reset() {
 	r.PrevSendCount = 0
 	r.EpochCount = 0
 	r.KEMSchemeName = ""
+}
+
+func (r *Ratchet) WithMax(max uint32) *Ratchet {
+	r.Max = max
+	return r
 }
 
 func New(seed []byte, isA bool) (*Ratchet, error) {
@@ -218,6 +223,7 @@ func (r *Ratchet) Send(message []byte) []byte {
 		if err != nil {
 			panic(err)
 		}
+		fs.Max(r.Max)
 		r.States[r.EpochCount] = fs
 	}
 
@@ -293,10 +299,12 @@ func (r *Ratchet) Receive(ciphertext []byte) ([]byte, error) {
 		// (σroot, k) ← P-Up(σroot, I)
 		key := r.Root.Up(sharedSecret)
 		// v[t] ← FS-Init-R(k)
-		r.States[myHeader.EpochCount], err = NewFSAEAD(key, false)
+		fs, err := NewFSAEAD(key, false)
 		if err != nil {
 			return nil, err
 		}
+		fs.Max(r.Max)
+		r.States[myHeader.EpochCount] = fs
 	}
 
 	// (v[t], i, m) ← FS-Rcv(v[t], h, e)

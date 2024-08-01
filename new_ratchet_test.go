@@ -152,8 +152,6 @@ func Test_RatchetDroppedMessages(t *testing.T) {
 
 func Test_RatchetReordering(t *testing.T) {
 
-	const maxMissingMessages = 30 // or however many you wanna loose
-
 	script := []scriptAction{}
 	script = append(script, scriptAction{sendA, deliver, -1})
 	for i := 0; i < maxMissingMessages; i++ {

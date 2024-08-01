@@ -101,6 +101,8 @@ func TestRatchetMarshaling(t *testing.T) {
 	require.Equal(t, message2, message2b)
 }
 
+const maxMissingMessages = 3
+
 func pairedRatchet(t *testing.T) (*Ratchet, *Ratchet) {
 	seed := make([]byte, RatchetSeedSize)
 	_, err := rand.Reader.Read(seed)
@@ -111,7 +113,7 @@ func pairedRatchet(t *testing.T) (*Ratchet, *Ratchet) {
 	bob, err := New(seed, false)
 	require.NoError(t, err)
 
-	return alice, bob
+	return alice.WithMax(maxMissingMessages), bob.WithMax(maxMissingMessages)
 }
 
 func reinitRatchet(t *testing.T, r *Ratchet) *Ratchet {
