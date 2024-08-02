@@ -4,7 +4,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/katzenpost/cryptonomicon.svg)](https://pkg.go.dev/github.com/katzenpost/cryptonomicon)
 [![Go Report Card](https://goreportcard.com/badge/github.com/katzenpost/cryptonomicon)](https://goreportcard.com/report/github.com/katzenpost/cryptonomicon)
-[![CI](https://github.com/katzenpost/cryptonomicon/actions/workflows/go.yml/badge.svg)](https://github.com/katzenpost/cryptonomicon/actions/workflows/go.yml)
+[![CI](https://github.com/katzenpost/cryptonomicon/actions/workflows/linux.yml/badge.svg)](https://github.com/katzenpost/cryptonomicon/actions/workflows/linux.yml)
 
 
 
